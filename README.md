@@ -40,9 +40,35 @@ python main.py select --csv result.csv
 python main.py analyze 600519 000001 300750
 ```
 
-> ⚠️ **网络要求**：需在可访问东方财富行情接口（`push2.eastmoney.com` 等）的环境运行。
-> 部分云沙箱/CI 的网络策略会拦截这些域名（返回 403），此时程序会给出明确提示并退出，
-> 请在本地或可访问该接口的环境运行。
+> ⚠️ **网络要求**：需在可访问行情接口的环境运行。部分云沙箱/CI 的网络策略会拦截
+> 这些域名（返回 403），此时程序会给出明确提示并退出，请在本地或可访问接口的环境运行。
+
+## 数据源
+
+支持两个可切换的数据源（`--source`）：
+
+| 数据源 | 说明 | licence | 全市场快照 |
+| :--- | :--- | :--- | :--- |
+| `eastmoney`（默认） | 东方财富公开接口，免费无需凭证 | 不需要 | 一次请求拿到全市场 |
+| `biying` | [必盈API](https://www.biyingapi.com/)，需付费 licence | 需要 | 实时按单只查询，逐只请求 |
+
+```bash
+# 用必盈数据源选股（licence 建议放环境变量，避免泄露）
+export BIYING_LICENCE=你的licence
+python main.py select --source biying --max-symbols 800
+
+# 或命令行传入
+python main.py analyze 600519 000001 --source biying --licence 你的licence
+```
+
+**关于必盈**：其实时接口是「按单只代码」查询，没有一次性全市场快照，因此全市场 `select`
+会逐只请求（用 `--max-symbols` 限制数量以免超配额）；`analyze` 指定个股则很轻量、最适合必盈。
+已对接的接口：股票列表 `hslt/list`、实时交易 `hsrl/ssjy`、历史日线 `hszbl/fsjy`（前复权）。
+若你的套餐文档中 K 线路径/参数不同，只需改 `astock/biyingapi.py` 顶部的
+`_KLINE_PATH / _KLINE_LEVEL / _KLINE_FQ` 三个常量。必盈财务指标接口因套餐而异，默认未启用
+（质量/成长因子会自动降权），如需可在 `biyingapi.main_indicators` 中按你的字段补齐。
+
+> 🔒 **licence 是私密凭证，不要写入代码库或提交到仓库**，请用环境变量或命令行参数传入。
 
 ## 选股方法论
 
@@ -77,6 +103,7 @@ main.py               命令行入口（select / analyze）
 astock/
   config.py           选股参数、因子权重、过滤阈值
   datasource.py       东方财富行情/财务数据抓取
+  biyingapi.py        必盈API 数据源（drop-in --source biying）
   indicators.py       技术指标计算（纯函数）
   factors.py          因子打分与横截面排名
   screener.py         两阶段选股流水线

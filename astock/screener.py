@@ -58,7 +58,7 @@ def _prescreen_rank(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
 
 
 def _deep_enrich(candidates: pd.DataFrame, cfg: Config,
-                 log: Callable[[str], None]) -> pd.DataFrame:
+                 log: Callable[[str], None], source) -> pd.DataFrame:
     """Stage 2：逐只抓日线与财务指标，补齐技术/质量/成长因子所需列。"""
     tech_scores = []
     fin_rows = []
@@ -66,7 +66,7 @@ def _deep_enrich(candidates: pd.DataFrame, cfg: Config,
     for i, row in candidates.iterrows():
         code = row["code"]
         # 技术面
-        kdf = ds.daily_kline(code, days=cfg.kline_days)
+        kdf = source.daily_kline(code, days=cfg.kline_days)
         if kdf is not None and len(kdf) >= 20:
             kdf = indicators.enrich(kdf)
             tech_scores.append(factors.technical_score_from_kline(kdf))
@@ -76,7 +76,7 @@ def _deep_enrich(candidates: pd.DataFrame, cfg: Config,
         else:
             tech_scores.append(None)
         # 基本面
-        fin = ds.main_indicators(code) if cfg.use_fundamentals else None
+        fin = source.main_indicators(code) if cfg.use_fundamentals else None
         if fin:
             got_fin += 1
         fin_rows.append(fin or {})
@@ -96,16 +96,18 @@ def _deep_enrich(candidates: pd.DataFrame, cfg: Config,
 
 def select(cfg: Config = DEFAULT_CONFIG,
            log: Optional[Callable[[str], None]] = None,
-           board: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+           board: Optional[pd.DataFrame] = None,
+           source=ds) -> pd.DataFrame:
     """执行完整选股流程，返回最终排名 DataFrame（含各因子分与综合分）。
 
+    source 为数据源对象（默认 eastmoney datasource 模块，也可传 BiyingSource）。
     board 可传入预先抓好的全市场快照（便于测试/复用）；为空则实时抓取。
     """
     log = log or (lambda _msg: None)
 
     log("Stage 1：抓取全市场快照 …")
     if board is None:
-        board = ds.spot_board()
+        board = source.spot_board()
     log(f"  全市场 {len(board)} 只")
 
     pool = apply_universe_filter(board, cfg)
@@ -117,7 +119,7 @@ def select(cfg: Config = DEFAULT_CONFIG,
     log(f"  初筛取前 {len(candidates)} 只进入深度打分")
 
     log("Stage 2：深度打分（抓日线 + 财务指标）…")
-    candidates = _deep_enrich(candidates, cfg, log)
+    candidates = _deep_enrich(candidates, cfg, log, source)
 
     weights = cfg.redistributed_weights(candidates.attrs.get("has_fundamentals", False))
     log(f"  采用权重：{ {k: round(v, 3) for k, v in weights.items()} }")

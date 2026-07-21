@@ -14,7 +14,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from astock import factors, indicators, screener  # noqa: E402
+from astock import biyingapi, factors, indicators, screener  # noqa: E402
 from astock.config import Config  # noqa: E402
 
 
@@ -127,6 +127,61 @@ def test_composite_ranks_and_offline_select():
     assert ranked["score"].between(0, 100).all()
     for col in ("f_value", "f_momentum", "f_quality", "f_growth", "f_technical"):
         assert col in ranked.columns
+
+
+def test_biying_parse_list():
+    df = biyingapi.parse_list([
+        {"dm": "000001", "mc": "平安银行", "jys": "sz"},
+        {"dm": "600519", "mc": "贵州茅台", "jys": "sh"},
+    ])
+    assert list(df.columns) == ["code", "name", "exchange"]
+    assert df.loc[0, "code"] == "000001"
+    assert df.loc[1, "name"] == "贵州茅台"
+
+
+def test_biying_parse_realtime():
+    obj = {"t": "2026-07-21 15:00:00", "o": "10.0", "h": "10.8", "l": "9.9",
+           "p": "10.5", "yc": "10.0", "v": "123456", "cje": "1.3e8",
+           "hs": "2.5", "pe": "12.3", "sz": "2.0e11", "lt": "1.5e11",
+           "zf": "9.0", "zs": "0.3"}
+    row = biyingapi.parse_realtime("000001", obj)
+    assert row["code"] == "000001"
+    assert row["price"] == 10.5 and row["pe_ttm"] == 12.3
+    assert abs(row["pct"] - 5.0) < 1e-6          # (10.5-10)/10*100
+    assert abs(row["mktcap"] - 2000.0) < 1e-6    # 2.0e11 元 -> 2000 亿
+    assert row["pb"] != row["pb"] or pd.isna(row["pb"])  # PB 缺失记 NaN
+
+
+def test_biying_parse_kline():
+    recs = [{"d": f"2026-01-{i:02d}", "o": 10 + i, "h": 11 + i, "l": 9 + i,
+             "c": 10.5 + i, "v": 1000 * i, "cje": 1e6 * i} for i in range(1, 26)]
+    kdf = biyingapi.parse_kline(recs)
+    assert kdf is not None and len(kdf) == 25
+    for col in ("date", "open", "high", "low", "close", "volume", "amount"):
+        assert col in kdf.columns
+    # parse_kline 产物应能直接喂给指标计算
+    enriched = indicators.enrich(kdf)
+    assert "macd_hist" in enriched.columns
+    # 空/缺字段返回 None
+    assert biyingapi.parse_kline([]) is None
+    assert biyingapi.parse_kline([{"o": 1, "c": 2}]) is None
+
+
+def test_biying_source_uses_pipeline_offline():
+    """用假数据源对象验证 biying 走通 screener（不联网）。"""
+    class FakeSource:
+        def spot_board(self):
+            return _synth_board(120, seed=11)
+        def daily_kline(self, code, days=120):
+            return indicators.enrich(_synth_kline(80, trend=0.2, seed=hash(code) % 100))
+        def main_indicators(self, code):
+            return None  # 模拟必盈默认不含财务
+    cfg = Config(top_n_candidates=15, final_n=6, request_pause=0.0)
+    ranked = screener.select(cfg, source=FakeSource())
+    assert len(ranked) == 6
+    assert list(ranked["score"]) == sorted(ranked["score"], reverse=True)
+    # 无财务 -> 质量/成长权重被摊掉，技术分来自真实K线（非恒 50）
+    assert ranked["f_technical"].nunique() > 1
 
 
 if __name__ == "__main__":
