@@ -66,7 +66,9 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
     out["rsi14"] = rsi(close, 14)
     out["k"], out["d"], out["j"] = kdj(out)
     out["boll_mid"], out["boll_up"], out["boll_low"] = boll(close)
-    # 中期动量：20 日 / 60 日收益率（%）
+    # 动量：5/10 日（短线）、20/60 日（中期）收益率（%）
+    out["ret5"] = close.pct_change(5) * 100
+    out["ret10"] = close.pct_change(10) * 100
     out["ret20"] = close.pct_change(20) * 100
     out["ret60"] = close.pct_change(60) * 100
     return out

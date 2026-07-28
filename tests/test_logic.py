@@ -167,6 +167,36 @@ def test_biying_parse_kline():
     assert biyingapi.parse_kline([{"o": 1, "c": 2}]) is None
 
 
+def test_short_term_config_and_weights():
+    cfg = Config.short_term()
+    assert cfg.style == "short_term"
+    w = cfg.redistributed_weights(True)
+    assert abs(sum(w.values()) - 1.0) < 1e-9
+    # 技术+动量应是短线配置里权重最高的两项
+    assert w["technical"] + w["momentum"] > w["value"] + w["quality"] + w["growth"]
+    assert cfg.min_turnover > Config().min_turnover  # 短线要求更高活跃度
+
+
+def test_short_term_momentum_uses_short_window():
+    df = pd.DataFrame({
+        "ret5": [10.0, -5.0], "ret10": [15.0, -8.0],
+        "ret20": [1.0, 1.0], "ret60": [1.0, 1.0],  # 中期动量故意持平，避免干扰对比
+    })
+    short_scores = factors.momentum_score(df, short_term=True)
+    long_scores = factors.momentum_score(df, short_term=False)
+    assert short_scores.iloc[0] > short_scores.iloc[1]      # 短线口径下第 0 只明显更强
+    assert long_scores.iloc[0] == long_scores.iloc[1]        # 中期口径下两者打平（20/60日相同）
+
+
+def test_short_term_technical_breakout_bonus():
+    kdf = indicators.enrich(_synth_kline(60, trend=0.3, seed=5))
+    balanced = factors.technical_score_from_kline(kdf, short_term=False)
+    short = factors.technical_score_from_kline(kdf, short_term=True)
+    assert 0 <= balanced <= 100 and 0 <= short <= 100
+    # 短线模式对同一强势K线至少不应打分更低（突破近20日新高等额外加分项只加不减）
+    assert short >= balanced - 1e-9
+
+
 def test_biying_source_uses_pipeline_offline():
     """用假数据源对象验证 biying 走通 screener（不联网）。"""
     class FakeSource:
@@ -182,6 +212,22 @@ def test_biying_source_uses_pipeline_offline():
     assert list(ranked["score"]) == sorted(ranked["score"], reverse=True)
     # 无财务 -> 质量/成长权重被摊掉，技术分来自真实K线（非恒 50）
     assert ranked["f_technical"].nunique() > 1
+
+
+def test_short_term_select_end_to_end_offline():
+    """短线风格走完整流水线（假数据源），验证 style 全链路生效且不报错。"""
+    class FakeSource:
+        def spot_board(self):
+            return _synth_board(150, seed=13)
+        def daily_kline(self, code, days=90):
+            return indicators.enrich(_synth_kline(80, trend=0.15, seed=hash(code) % 100))
+        def main_indicators(self, code):
+            return None
+    cfg = Config.short_term().copy_with(top_n_candidates=20, final_n=5, request_pause=0.0)
+    ranked = screener.select(cfg, source=FakeSource())
+    assert len(ranked) == 5
+    assert "ret5" in ranked.columns and "ret10" in ranked.columns
+    assert list(ranked["score"]) == sorted(ranked["score"], reverse=True)
 
 
 if __name__ == "__main__":

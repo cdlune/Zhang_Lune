@@ -5,11 +5,18 @@
     --source eastmoney  东方财富公开接口（默认，全市场一次抓取，无需 licence）
     --source biying     必盈API（需 --licence 或环境变量 BIYING_LICENCE；实时按单只查询）
 
+选股风格（--style）：
+    balanced      均衡多因子（默认）：估值/质量/成长权重较高，偏中长线
+    short_term    短线交易：看重强势/放量/活跃度，弱化估值与基本面，
+                  动量改用 5/10 日短周期，波动与回撤风险显著更高
+
 用法示例：
     python main.py select                                  # 东财，全市场多因子选股
+    python main.py select --style short_term                # 短线选股
     python main.py select --final 20 --no-fund             # 关闭财务抓取（更快）
     python main.py select --source biying --licence XXXX --max-symbols 800
     python main.py analyze 600519 000001                   # 分析指定个股（东财）
+    python main.py analyze 600519 --style short_term        # 按短线口径分析个股
     python main.py analyze 600519 --source biying --licence XXXX
 
 依赖：requests, pandas, numpy（见 requirements.txt）。
@@ -35,9 +42,10 @@ def _log(msg: str) -> None:
 
 
 def _build_config(args) -> Config:
-    cfg = DEFAULT_CONFIG.copy_with(
-        final_n=getattr(args, "final", DEFAULT_CONFIG.final_n),
-        top_n_candidates=getattr(args, "candidates", DEFAULT_CONFIG.top_n_candidates),
+    base = Config.short_term() if getattr(args, "style", "balanced") == "short_term" else DEFAULT_CONFIG
+    cfg = base.copy_with(
+        final_n=getattr(args, "final", base.final_n),
+        top_n_candidates=getattr(args, "candidates", base.top_n_candidates),
         use_fundamentals=not getattr(args, "no_fund", False),
     )
     if getattr(args, "small_cap", False):
@@ -94,6 +102,8 @@ _snapshot_row._board = None
 
 
 def cmd_analyze(args) -> int:
+    cfg = _build_config(args)
+    short = cfg.style == "short_term"
     try:
         source = _build_source(args)
     except ds.DataSourceError as exc:
@@ -111,12 +121,13 @@ def cmd_analyze(args) -> int:
         if not row:
             _log(f"[跳过] 未找到或无数据：{code}")
             continue
-        kdf = source.daily_kline(code, days=DEFAULT_CONFIG.kline_days)
+        kdf = source.daily_kline(code, days=cfg.kline_days)
         if kdf is not None and len(kdf) >= 20:
             kdf = indicators.enrich(kdf)
             last = kdf.iloc[-1]
+            row["ret5"], row["ret10"] = last["ret5"], last["ret10"]
             row["ret20"], row["ret60"] = last["ret20"], last["ret60"]
-            row["technical"] = factors.technical_score_from_kline(kdf)
+            row["technical"] = factors.technical_score_from_kline(kdf, short_term=short)
         fin = source.main_indicators(code)
         if fin:
             row.update(fin)
@@ -127,12 +138,12 @@ def cmd_analyze(args) -> int:
         return 1
     df = pd.DataFrame(rows)
     has_fund = any(c in df.columns for c in ("roe", "rev_yoy"))
-    weights = DEFAULT_CONFIG.redistributed_weights(has_fund)
-    scored = factors.composite(df, weights)
+    weights = cfg.redistributed_weights(has_fund)
+    scored = factors.composite(df, weights, short_term=short)
     print(report.selection_table(scored))
     print()
     for _, r in scored.iterrows():
-        print(report.stock_detail(r))
+        print(report.stock_detail(r, short_term=short))
         print()
     return 0
 
@@ -144,6 +155,8 @@ def _add_source_args(sp):
                     help="必盈 licence（也可用环境变量 BIYING_LICENCE）")
     sp.add_argument("--max-symbols", type=int, default=None,
                     help="必盈全市场抓取上限（逐只请求，避免超配额）")
+    sp.add_argument("--style", choices=["balanced", "short_term"], default="balanced",
+                    help="选股风格：balanced 均衡（默认）/ short_term 短线")
 
 
 def main(argv=None) -> int:

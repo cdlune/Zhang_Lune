@@ -41,6 +41,31 @@ class Config:
     use_fundamentals: bool = True  # 是否抓取财务主要指标（较慢）
     request_pause: float = 0.15  # 每次请求间隔（秒），避免被限流
 
+    # -------- 风格 --------
+    style: str = "balanced"      # "balanced"（均衡多因子）或 "short_term"（短线）
+
+    @classmethod
+    def short_term(cls) -> "Config":
+        """短线交易预设：看重强势/放量/活跃度，弱化估值与基本面。
+
+        与均衡模式的主要差异：
+        - 提高最低换手率门槛（要有人气/成交活跃才谈得上短线）
+        - 大幅放宽 PE/PB 上限（短线不为估值买单，只为趋势买单）
+        - 技术、动量权重大幅上调，估值权重降到很低
+        - 动量因子改用更短周期（5/10 日）而非 20/60 日
+        """
+        return cls(
+            min_turnover=3.0, max_turnover=25.0,
+            min_mktcap_yi=20.0, max_mktcap_yi=3000.0,
+            max_pe=300.0, max_pb=30.0,
+            weights={
+                "technical": 0.40, "momentum": 0.35,
+                "value": 0.05, "quality": 0.10, "growth": 0.10,
+            },
+            kline_days=90,
+            style="short_term",
+        )
+
     def redistributed_weights(self, has_fundamentals: bool) -> Dict[str, float]:
         """当无基本面数据时，把 quality/growth 权重按比例摊到其余因子上。"""
         w = dict(self.weights)

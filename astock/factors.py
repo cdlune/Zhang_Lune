@@ -42,16 +42,22 @@ def value_score(df: pd.DataFrame) -> pd.Series:
             + 0.45 * rank_score(pb, ascending=True)).round(2)
 
 
-def momentum_score(df: pd.DataFrame) -> pd.Series:
-    """动量因子：中期涨幅越高越好。优先用日线算的 ret20/ret60，缺失回落到快照 60 日涨幅。"""
-    r20 = df.get("ret20")
-    r60 = df.get("ret60")
-    if r20 is None:
-        r20 = pd.Series(np.nan, index=df.index)
-    if r60 is None:
-        r60 = df.get("pct_60d", pd.Series(np.nan, index=df.index))
-    return (0.5 * rank_score(r20, ascending=False)
-            + 0.5 * rank_score(r60, ascending=False)).round(2)
+def momentum_score(df: pd.DataFrame, short_term: bool = False) -> pd.Series:
+    """动量因子：涨幅越高越好。
+
+    short_term=True 时改用 5/10 日短周期涨幅（短线交易看近端强弱，而非中期趋势）；
+    否则用 20/60 日中期涨幅。日线字段缺失时按需回落到快照 60 日涨幅。
+    """
+    if short_term:
+        r_fast = df.get("ret5", pd.Series(np.nan, index=df.index))
+        r_slow = df.get("ret10", pd.Series(np.nan, index=df.index))
+    else:
+        r_fast = df.get("ret20", pd.Series(np.nan, index=df.index))
+        r_slow = df.get("ret60")
+        if r_slow is None:
+            r_slow = df.get("pct_60d", pd.Series(np.nan, index=df.index))
+    return (0.5 * rank_score(r_fast, ascending=False)
+            + 0.5 * rank_score(r_slow, ascending=False)).round(2)
 
 
 def quality_score(df: pd.DataFrame) -> pd.Series:
@@ -69,8 +75,12 @@ def growth_score(df: pd.DataFrame) -> pd.Series:
     return (0.45 * rev + 0.55 * profit).round(2)
 
 
-def technical_score_from_kline(kdf: pd.DataFrame) -> Optional[float]:
-    """由单只个股（已 enrich 的）日线算 0~100 技术面得分。数据不足返回 None。"""
+def technical_score_from_kline(kdf: pd.DataFrame, short_term: bool = False) -> Optional[float]:
+    """由单只个股（已 enrich 的）日线算 0~100 技术面得分。数据不足返回 None。
+
+    short_term=True 时启用短线专用规则：突破近 20 日新高加分、放量加分权重更高、
+    对 RSI 超买的容忍度更高（短线策略本就追强势，不因超买提前减分）。
+    """
     if kdf is None or len(kdf) < 20:
         return None
     last = kdf.iloc[-1]
@@ -94,34 +104,49 @@ def technical_score_from_kline(kdf: pd.DataFrame) -> Optional[float]:
         score += 4  # 红柱放大 / 绿柱缩短
 
     # 3) RSI：健康区间加分，超买减分，超卖轻微加分（潜在反弹）
+    # 短线策略本就追强势股，对超买的容忍度更高（减分力度减半）
     rsi = last["rsi14"]
+    overbought_penalty = -5 if short_term else -10
     if 45 <= rsi <= 68:
         score += 8
     elif rsi > 80:
-        score -= 10
+        score += overbought_penalty
     elif rsi < 25:
         score += 3
 
-    # 4) 量能：近 5 日均量温和放大（1.0~2.5 倍）为健康
+    # 4) 量能：温和放大为健康；短线额外奖励更大幅放量（人气/资金介入）
     if last["vol_ma20"] and last["vol_ma20"] > 0:
         vr = last["vol_ma5"] / last["vol_ma20"]
-        if 1.0 <= vr <= 2.5:
-            score += 6
-        elif vr > 4.0:
-            score -= 6  # 过度放量，警惕高位出货
+        if short_term:
+            if 1.2 <= vr <= 4.0:
+                score += 8
+            elif vr > 6.0:
+                score -= 6  # 过度放量，警惕高位出货/游资出逃
+        else:
+            if 1.0 <= vr <= 2.5:
+                score += 6
+            elif vr > 4.0:
+                score -= 6
+
+    # 5) 短线专属：股价逼近/突破近 20 日新高（趋势强势的直接信号）
+    if short_term:
+        high20 = kdf["high"].tail(20).max()
+        if pd.notna(high20) and high20 > 0 and close >= high20 * 0.995:
+            score += 10
 
     return float(np.clip(score, 0, 100))
 
 
-def composite(df: pd.DataFrame, weights: Dict[str, float]) -> pd.DataFrame:
+def composite(df: pd.DataFrame, weights: Dict[str, float], short_term: bool = False) -> pd.DataFrame:
     """给候选 DataFrame 计算各因子分与加权综合分，返回带打分列的新 DataFrame。
 
     df 需含用于打分的原始列；缺失的因子列会被记为中性分 50 并仍参与加权。
     technical 分若已由 K 线预先算好（列 technical），则直接使用。
+    short_term=True 时动量因子改用 5/10 日短周期口径。
     """
     out = df.copy()
     out["f_value"] = value_score(out)
-    out["f_momentum"] = momentum_score(out)
+    out["f_momentum"] = momentum_score(out, short_term=short_term)
     out["f_quality"] = quality_score(out)
     out["f_growth"] = growth_score(out)
     if "technical" in out.columns:

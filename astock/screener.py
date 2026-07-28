@@ -51,15 +51,24 @@ def apply_universe_filter(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
 
 
 def _prescreen_rank(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
-    """用估值+动量给股票池初步打分（仅用快照字段，不发额外请求）。"""
-    pre_weights = {"value": 0.6, "momentum": 0.4}
-    scored = factors.composite(df, pre_weights)
+    """用估值+动量给股票池初步打分（仅用快照字段，不发额外请求）。
+
+    短线风格：初筛就应偏向"当下强势"，动量权重远高于估值。
+    """
+    short = cfg.style == "short_term"
+    pre_weights = {"value": 0.15, "momentum": 0.85} if short else {"value": 0.6, "momentum": 0.4}
+    df = df.copy()
+    if short and "ret5" not in df.columns:
+        # 初筛阶段还没拉日线，用快照的当日涨跌幅作为短周期动量的粗代理
+        df["ret5"] = df.get("pct")
+    scored = factors.composite(df, pre_weights, short_term=short)
     return scored.head(cfg.top_n_candidates).reset_index(drop=True)
 
 
 def _deep_enrich(candidates: pd.DataFrame, cfg: Config,
                  log: Callable[[str], None], source) -> pd.DataFrame:
     """Stage 2：逐只抓日线与财务指标，补齐技术/质量/成长因子所需列。"""
+    short = cfg.style == "short_term"
     tech_scores = []
     fin_rows = []
     got_fin = 0
@@ -69,8 +78,10 @@ def _deep_enrich(candidates: pd.DataFrame, cfg: Config,
         kdf = source.daily_kline(code, days=cfg.kline_days)
         if kdf is not None and len(kdf) >= 20:
             kdf = indicators.enrich(kdf)
-            tech_scores.append(factors.technical_score_from_kline(kdf))
+            tech_scores.append(factors.technical_score_from_kline(kdf, short_term=short))
             last = kdf.iloc[-1]
+            candidates.loc[i, "ret5"] = last["ret5"]
+            candidates.loc[i, "ret10"] = last["ret10"]
             candidates.loc[i, "ret20"] = last["ret20"]
             candidates.loc[i, "ret60"] = last["ret60"]
         else:
@@ -124,5 +135,5 @@ def select(cfg: Config = DEFAULT_CONFIG,
     weights = cfg.redistributed_weights(candidates.attrs.get("has_fundamentals", False))
     log(f"  采用权重：{ {k: round(v, 3) for k, v in weights.items()} }")
 
-    ranked = factors.composite(candidates, weights)
+    ranked = factors.composite(candidates, weights, short_term=(cfg.style == "short_term"))
     return ranked.head(cfg.final_n).reset_index(drop=True)
