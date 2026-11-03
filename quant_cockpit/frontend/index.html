@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>量化交易驾驶舱</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">Q</span>量化驾驶舱 <span class="pill gray">PRO</span></div>
+  <nav class="nav">
+    <a class="active">操盘台</a><a data-jump="sec-pipeline">执行链路</a><a data-jump="sec-pool">策略选股</a>
+    <a data-jump="sec-intel">情报中心</a><a data-jump="sec-events">预警监控</a>
+  </nav>
+  <div class="right">
+    <span class="pill amber" id="modeBadge">模拟 · sim</span>
+    <span class="pill" id="clockBadge">--</span>
+    <span class="pill red" id="liveBadge">只读演示</span>
+  </div>
+</header>
+
+<section class="titlebar">
+  <div>
+    <h1>全自动量化交易驾驶舱 <span class="pill green" id="runBadge">● 运行中</span>
+      <span class="pill blue" id="acctBadge">--</span></h1>
+    <div class="sub" id="subTitle">情报驱动短线 · LLM 交易意向 / 区间执行 / T+3 复评 / 资金与风控</div>
+  </div>
+  <div class="ctrls" id="simCtrls">
+    <label>倍速 <select id="speed"><option>30</option><option selected>60</option><option>120</option><option>300</option></select></label>
+    <button class="btn" data-act="infer">立即推演</button>
+    <button class="btn" data-act="next_day">下一交易日</button>
+    <button class="btn ghost" data-act="reset">重置</button>
+  </div>
+</section>
+
+<main>
+  <!-- 执行链路 -->
+  <section class="card" id="sec-pipeline">
+    <div class="card-h"><h2>执行链路</h2><span class="muted" id="phase"></span></div>
+    <div class="pipeline" id="pipeline"></div>
+  </section>
+
+  <!-- 风控与资产中枢 -->
+  <section class="card">
+    <div class="card-h">
+      <h2>🛡 风控与资产中枢 <span class="pill" id="riskRun">--</span> <span class="pill" id="roBadge">--</span>
+        <span class="pill" id="reconBadge">--</span></h2>
+      <div>
+        <button class="btn" data-act="readonly" id="btnRO">只读防误触</button>
+        <button class="btn" data-act="pause" id="btnPause">暂停调度</button>
+        <button class="btn" data-act="unhalt" id="btnUnhalt" hidden>解除熔断</button>
+        <button class="btn danger" data-act="liquidate" data-confirm="确认一键清仓？将以低于现价 2% 提交所有可卖持仓">一键清仓</button>
+      </div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">账户净值</div><div class="v" id="kEquity">--</div><div class="s" id="kEquityS"></div></div>
+      <div class="kpi" id="kPnlBox"><div class="k">当日盈亏</div><div class="v" id="kPnl">--</div><div class="s" id="kPnlS"></div></div>
+      <div class="kpi"><div class="k">可用现金</div><div class="v" id="kCash">--</div><div class="bar"><i id="kCashBar"></i></div><div class="s" id="kCashS"></div></div>
+      <div class="kpi"><div class="k">持仓市值</div><div class="v" id="kPos">--</div><div class="bar"><i id="kPosBar"></i></div><div class="s" id="kPosS"></div></div>
+    </div>
+    <div class="limits" id="limits"></div>
+    <div class="foot muted" id="cfgVer"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <div class="tabs" id="ledgerTabs">
+        <button class="on" data-tab="positions">当前持仓</button><button data-tab="orders">今日委托</button>
+        <button data-tab="fills">真实成交</button><button data-tab="closed">历史平仓</button>
+      </div>
+      <div id="ledger" class="tablewrap"></div>
+    </section>
+    <section class="card" id="sec-events">
+      <div class="card-h"><h2>实时事件流</h2>
+        <div class="tabs small" id="evTabs"><button class="on" data-ev="">全部</button><button data-ev="风控">风控</button>
+          <button data-ev="委托">委托</button><button data-ev="对账">对账</button><button data-ev="推演">推演</button></div></div>
+      <div id="events" class="events"></div>
+    </section>
+  </div>
+
+  <!-- LLM 盘中推演 -->
+  <section class="card llm" id="sec-llm">
+    <div class="card-h"><h2>✦ 大模型实时盘中推演 <span id="roundTitle"></span> <span class="pill blue" id="interval"></span></h2>
+      <span class="pill" id="roundBadge"></span></div>
+    <div class="box" id="macroBox"></div>
+    <div class="box warn" id="rejBox"></div>
+    <div id="holdBox" class="hold"></div>
+    <details id="history"><summary id="histSum">查看今日盘中历史推演过程</summary><div id="histList"></div></details>
+    <h3>活动意向（当前判断）</h3>
+    <div class="tablewrap" id="intents"></div>
+  </section>
+
+  <!-- 选股池 + 雷达 -->
+  <section class="card" id="sec-pool">
+    <div class="card-h"><h2>两级选票漏斗 · 因子雷达</h2><span class="muted">点击标的查看雷达</span></div>
+    <div class="poolgrid">
+      <div class="tablewrap" id="pool"></div>
+      <div class="radarbox"><svg id="radar" viewBox="-160 -150 320 300"></svg><div class="factors" id="factorBars"></div></div>
+    </div>
+  </section>
+
+  <section class="card" id="sec-intel">
+    <div class="card-h"><h2>五源情报</h2><span class="muted">公告 / 新闻快讯 / 资金流 / 龙虎榜 / 政策研报</span></div>
+    <div class="tablewrap" id="intel"></div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
