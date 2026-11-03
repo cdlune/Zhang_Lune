@@ -40,10 +40,20 @@ async def lifespan(_app):
 app = FastAPI(title="量化交易驾驶舱", lifespan=lifespan)
 
 
+_last_state: dict = {}
+
+
 @app.get("/api/state")
 def state():
-    with lock:
-        return engine.state()
+    # 真实 LLM 调用可能持锁数十秒，此时返回上一份快照，避免页面卡死
+    global _last_state
+    if lock.acquire(timeout=0.5):
+        try:
+            _last_state = engine.state()
+        finally:
+            lock.release()
+        return _last_state
+    return {**_last_state, "busy": "LLM 推演中…"} if _last_state else {"busy": "LLM 推演中…"}
 
 
 class Control(BaseModel):

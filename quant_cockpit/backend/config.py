@@ -40,6 +40,7 @@ class Settings:
     llm_base_url: str = _env("QC_LLM_BASE_URL", "https://api.deepseek.com/v1")
     llm_api_key: str = _env("QC_LLM_API_KEY", "")
     llm_model: str = _env("QC_LLM_MODEL", "deepseek-chat")
+    llm_timeout: float = float(_env("QC_LLM_TIMEOUT", "60"))
     llm_daily_budget_cny: float = float(_env("QC_LLM_BUDGET", "20"))
     llm_price_per_1k_tokens: float = float(_env("QC_LLM_PRICE_1K", "0.004"))
 

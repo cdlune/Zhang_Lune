@@ -17,7 +17,7 @@ from .broker import BrokerBase, PaperBroker
 from .clock import Clock, is_trading, trade_days_between
 from .config import RiskConfig, Settings
 from .db import DB
-from .llm import LLMClient, build_user_prompt
+from .llm import FUNNEL_SYSTEM_PROMPT, LLMClient, build_user_prompt
 from .market import AkShareMarket, Breadth, MarketProvider, Quote, SimMarket, board, exchange
 from .risk import AccountState, RiskEngine
 
@@ -46,6 +46,8 @@ class Engine:
         self.last_infer: datetime | None = None
         self.recon = {"status": "未对账", "diffs": []}
         self.market.step(self.clock)
+        if settings.llm_provider != "mock" and self.llm.provider == "mock":
+            self.event("系统", f"LLM provider={settings.llm_provider} 但未设置 QC_LLM_API_KEY，已使用规则引擎", level="warn")
 
     # ================================================================ 工具
     def event(self, category: str, title: str, detail: str = "", level: str = "info") -> None:
@@ -212,9 +214,8 @@ class Engine:
                             "thesis": (c["intel"][0] if c["intel"] else "无增量情报") + "，关注盘中承接"})
             return {"analysis": out}
 
-        prompt = ("对以下预筛池标的做深度分析，每只给出 confidence(0-100) 与一句话 thesis，"
-                  "输出 {\"analysis\":[{\"symbol\":..,\"confidence\":..,\"thesis\":..}]}：\n" + str(ctx))
-        res, provider = self.llm.chat_json("funnel", prompt, mock)
+        prompt = "预筛候选池（JSON）：\n" + _dumps(ctx) + "\n请输出 analysis JSON。"
+        res, provider = self.llm.chat_json("funnel", prompt, mock, system=FUNNEL_SYSTEM_PROMPT)
         conf = {a["symbol"]: (float(a.get("confidence", 50)), a.get("thesis", "")) for a in res.get("analysis", [])}
         ranked = sorted(stage1, key=lambda x: conf.get(x[1], (0, ""))[0], reverse=True)
         for k, (pre, s, q, f) in enumerate(ranked):

@@ -28,6 +28,16 @@ export QC_LLM_PROVIDER=anthropic QC_LLM_BASE_URL=https://api.anthropic.com QC_LL
 export QC_LLM_BUDGET=20   # 每日预算（元），超出后自动降级为规则引擎
 ```
 
+### DeepSeek 自检
+
+```bash
+export QC_LLM_PROVIDER=openai QC_LLM_API_KEY=sk-...    # base_url / model 默认就是 DeepSeek
+python -m backend.check_llm
+```
+
+自检会依次做三件事：先发一个最小请求，确认网络、密钥和余额都正常；再在临时库里把模拟盘跑到 10:00，由 DeepSeek 完成漏斗分析和几轮盘中推演；最后打印 LLM 原始输出和经代码校验后发布的意向。
+`deepseek-reasoner` 也能用（`QC_LLM_MODEL=deepseek-reasoner`），系统会自动去掉它不支持的 JSON 模式和 temperature 参数。不过它更慢，推演间隔建议调到 ≥ 15 分钟，`QC_LLM_TIMEOUT` 也要调大。
+
 ## 接入真实行情（纸面交易）
 
 ```bash

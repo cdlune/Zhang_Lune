@@ -217,7 +217,11 @@ function render() {
 }
 
 async function refresh() {
-  try { S = await (await fetch("/api/state")).json(); render(); } catch (e) { $("clockBadge").textContent = "● 连接断开"; }
+  try {
+    const s = await (await fetch("/api/state")).json();
+    if (s.clock) { S = s; render(); }
+    if (s.busy) $("roundBadge").textContent = "● " + s.busy;
+  } catch (e) { $("clockBadge").textContent = "● 连接断开"; }
 }
 refresh();
 setInterval(refresh, 1500);
